@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Navigasi OpenLayers - Mobil/Motor</title>
+    
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#4285F4">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/854/854878.png">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v9.1.0/ol.css">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; overflow: hidden; background: #e5e3df; }
+        #map { width: 100vw; height: 100vh; position: absolute; z-index: 1; }
+        
+        /* Hilangkan kontrol bawaan OpenLayers agar bersih */
+        .ol-zoom, .ol-attribution { display: none !important; }
+        
+        /* PANEL PENCARIAN */
+        #top-panel {
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+            width: 92%; max-width: 420px; z-index: 10;
+            background: rgba(255, 255, 255, 0.98); border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15); padding: 12px;
+            backdrop-filter: blur(8px);
+        }
+        input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 10px; font-size: 15px; outline: none; }
+        #suggestions {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border-radius: 10px; margin-top: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            max-height: 200px; overflow-y: auto; display: none; list-style: none;
+        }
+        #suggestions li { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 14px; }
+        #route-info { display: none; font-size: 13px; text-align: center; font-weight: bold; margin-top: 8px; color: #444; }
+
+        /* SPEEDOMETER */
+        #speed-panel { position: absolute; bottom: 25px; left: 20px; z-index: 10; }
+        .speed-circle {
+            background: #202124; color: #00FF00; width: 70px; height: 70px;
+            border-radius: 50%; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; border: 3px solid #333;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .speed-val { font-size: 24px; font-weight: bold; }
+        .speed-unit { font-size: 9px; opacity: 0.8; }
+
+        /* TOMBOL AKSI */
+        #action-group {
+            position: absolute; bottom: 25px; right: 20px; z-index: 10;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .btn-round {
+            width: 50px; height: 50px; background: white; border: none;
+            border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            font-size: 20px; cursor: pointer; display: flex;
+            justify-content: center; align-items: center; color: #444; transition: 0.2s;
+        }
+        .btn-round.active { background: #4285F4; color: white; }
+
+        /* MODAL */
+        #modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 100; justify-content: center; align-items: center;
+        }
+        .modal-box { background: white; padding: 25px; border-radius: 20px; width: 80%; max-width: 320px; text-align: center; }
+        .opt-grid { display: flex; gap: 15px; margin-top: 20px; }
+        .opt-btn { flex: 1; padding: 15px; border: 2px solid #eee; border-radius: 12px; cursor: pointer; background: #f9f9f9; }
+        .opt-btn.selected { border-color: #4285F4; background: #e8f0fe; }
+
+        /* KURSOR KENDARAAN (HTML Overlay) */
+        .v-marker { width: 40px; height: 40px; transition: transform 0.2s linear; }
+        .v-icon { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; filter: drop-shadow(0 3px 4px rgba(0,0,0,0.4)); }
+        .car { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M25 10 C35 5, 65 5, 75 10 L85 25 L85 75 L75 90 C65 95, 35 95, 25 90 L15 75 L15 25 Z" fill="%234285F4"/><rect x="30" y="85" width="10" height="5" fill="%23FF4444"/><rect x="60" y="85" width="10" height="5" fill="%23FF4444"/></svg>'); }
+        .bike { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><ellipse cx="50" cy="50" rx="12" ry="40" fill="%23EA4335"/></svg>'); }
+        
+        .dest-marker { font-size: 30px; text-shadow: 0 2px 4px rgba(0,0,0,0.5); margin-top: -30px; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="top-panel">
+        <input type="text" id="search" placeholder="Cari tujuan navigasi..." autocomplete="off">
+        <ul id="suggestions"></ul>
+        <div id="route-info">Jarak: <span id="d">0</span> km | ETA: <span id="t">0</span> mnt</div>
+    </div>
+
+    <div id="speed-panel">
+        <div class="speed-circle"><div class="speed-val" id="sp">0</div><div class="speed-unit">KM/H</div></div>
+    </div>
+
+    <div id="action-group">
+        <button class="btn-round" id="traffic-btn" onclick="toggleTraffic()" title="Lalu Lintas">🚥</button>
+        <button class="btn-round" id="nav-btn" onclick="toggleNavMode()" title="Mode Navigasi Head-up">🧭</button>
+        <button class="btn-round" onclick="document.getElementById('modal').style.display='flex'">⚙️</button>
+        <button class="btn-round" onclick="centerMap()">📍</button>
+    </div>
+
+    <div id="modal" onclick="this.style.display='none'">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <h3>Pilih Kendaraan</h3>
+            <div class="opt-grid">
+                <button class="opt-btn selected" id="oc" onclick="selV('car')">🚗<br>Mobil</button>
+                <button class="opt-btn" id="ob" onclick="selV('bike')">🏍️<br>Motor</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ol@v9.1.0/dist/ol.js"></script>
+    <script>
+        // Memaksa OpenLayers menggunakan koordinat standar (Longitude, Latitude)
+        ol.proj.useGeographic();
+
+        let loc = [106.7932, -6.5971]; // Area Bogor
+        let dest = null;
+        let isNavMode = false;
+        let showTraffic = false;
+        let headingDeg = 0;
+
+        // 1. Inisialisasi Peta OpenLayers
+        const map = new ol.Map({
+            target: 'map',
+            layers: [
+                new ol.layer.Tile({
+                    source: new ol.source.XYZ({
+                        url: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+                        attributions: '© OpenStreetMap contributors, © CARTO'
+                    })
+                })
+            ],
+            view: new ol.View({
+                center: loc,
+                zoom: 15,
+                rotation: 0 // Rotasi awal 0 (Utara di atas)
+            })
+        });
+
+        // Layer untuk Garis Rute & Lalu Lintas
+        let routeLayer = null;
+        let trafficLayer = null;
+
+        // 2. Kursor Kendaraan (Overlay HTML)
+        const vEl = document.createElement('div');
+        vEl.className = 'v-marker';
+        const vIcon = document.createElement('div');
+        vIcon.id = 'vi'; vIcon.className = 'v-icon car';
+        vEl.appendChild(vIcon);
+
+        const vehicleOverlay = new ol.Overlay({
+            element: vEl,
+            positioning: 'center-center',
+            stopEvent: false
+        });
+        map.addOverlay(vehicleOverlay);
+        vehicleOverlay.setPosition(loc);
+
+        // Marker Tujuan (Overlay HTML)
+        const dEl = document.createElement('div');
+        dEl.className = 'dest-marker';
+        dEl.innerHTML = '🔴';
+        dEl.style.display = 'none';
+        const destOverlay = new ol.Overlay({ element: dEl, positioning: 'bottom-center' });
+        map.addOverlay(destOverlay);
+
+        // ==========================================
+        // FITUR LALU LINTAS
+        // ==========================================
+        function toggleTraffic() {
+            showTraffic = !showTraffic;
+            document.getElementById('traffic-btn').classList.toggle('active', showTraffic);
+            
+            if (showTraffic) {
+                trafficLayer = new ol.layer.Tile({
+                    source: new ol.source.XYZ({
+                        url: 'https://api.tomtom.com/traffic/map/4/tile/flow/relative/15/{z}/{x}/{y}.png?key=YOUR_API_KEY_HERE',
+                    }),
+                    opacity: 0.7
+                });
+                map.addLayer(trafficLayer);
+            } else if (trafficLayer) {
+                map.removeLayer(trafficLayer);
+                trafficLayer = null;
+            }
+        }
+
+        // ==========================================
+        // PENCARIAN & NAVIGASI OSRM
+        // ==========================================
+        const sIn = document.getElementById('search');
+        const sBox = document.getElementById('suggestions');
+
+        sIn.addEventListener('input', async () => {
+            const q = sIn.value;
+            if(q.length < 3) return sBox.style.display='none';
+            const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=5`);
+            const data = await res.json();
+            sBox.innerHTML = '';
+            if(data.features.length) {
+                sBox.style.display='block';
+                data.features.forEach(f => {
+                    const li = document.createElement('li');
+                    li.innerText = f.properties.name + ", " + (f.properties.city || "");
+                    li.onclick = () => {
+                        dest = f.geometry.coordinates;
+                        sIn.value = li.innerText;
+                        sBox.style.display='none';
+                        dEl.style.display = 'block';
+                        destOverlay.setPosition(dest);
+                        getRoute();
+                    };
+                    sBox.appendChild(li);
+                });
+            }
+        });
+
+        async function getRoute() {
+            if(!dest) return;
+            const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${loc[0]},${loc[1]};${dest[0]},${dest[1]}?overview=full&geometries=geojson`);
+            const data = await res.json();
+            if(data.routes.length) {
+                const r = data.routes[0];
+                document.getElementById('route-info').style.display='block';
+                document.getElementById('d').innerText = (r.distance/1000).toFixed(1);
+                document.getElementById('t').innerText = Math.round(r.duration/60);
+                
+                // Gambar Garis Rute di OpenLayers
+                const format = new ol.format.GeoJSON();
+                const routeFeature = format.readFeature(r.geometry);
+                
+                if(routeLayer) map.removeLayer(routeLayer);
+                
+                routeLayer = new ol.layer.Vector({
+                    source: new ol.source.Vector({ features: [routeFeature] }),
+                    style: new ol.style.Style({
+                        stroke: new ol.style.Stroke({ color: '#4285F4', width: 6 })
+                    })
+                });
+                
+                // Masukkan rute di bawah layer traffic/overlay
+                map.getLayers().insertAt(1, routeLayer);
+
+                // Auto Fit Bounds
+                const extent = routeFeature.getGeometry().getExtent();
+                map.getView().fit(extent, { padding: [100, 100, 150, 100], duration: 1000 });
+            }
+        }
+
+        // ==========================================
+        // GPS & UI KONTROL
+        // ==========================================
+        function toggleNavMode() {
+            isNavMode = !isNavMode;
+            document.getElementById('nav-btn').classList.toggle('active', isNavMode);
+            const view = map.getView();
+            view.animate({
+                rotation: isNavMode ? (headingDeg * Math.PI / 180) : 0,
+                zoom: isNavMode ? 17 : 15,
+                duration: 500
+            });
+        }
+
+        function selV(t) {
+            vIcon.className = 'v-icon ' + t;
+            document.getElementById('oc').className = 'opt-btn ' + (t=='car'?'selected':'');
+            document.getElementById('ob').className = 'opt-btn ' + (t=='bike'?'selected':'');
+            document.getElementById('modal').style.display='none';
+        }
+
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition(p => {
+                loc = [p.coords.longitude, p.coords.latitude];
+                vehicleOverlay.setPosition(loc);
+                
+                if(p.coords.heading !== null && !isNaN(p.coords.heading)) {
+                    headingDeg = p.coords.heading;
+                    
+                    // Rotasi Kursor HTML
+                    vEl.style.transform = `rotate(${headingDeg}deg)`;
+                    
+                    // Jika Mode Navigasi Aktif, putar petanya (Head-up)
+                    if(isNavMode) {
+                        map.getView().setRotation(headingDeg * Math.PI / 180);
+                        map.getView().setCenter(loc);
+                    }
+                }
+                document.getElementById('sp').innerText = p.coords.speed ? Math.round(p.coords.speed * 3.6) : 0;
+            }, null, {enableHighAccuracy:true});
+        }
+
+        function centerMap() { 
+            map.getView().animate({center: loc, zoom: 17, duration: 1000}); 
+        }
+    </script>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then((reg) => console.log('Service Worker berhasil didaftarkan dengan scope:', reg.scope))
+                    .catch((err) => console.error('Pendaftaran Service Worker gagal:', err));
+            });
+        }
+    </script>
+</body>
+</html>
